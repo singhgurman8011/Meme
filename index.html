@@ -3,229 +3,217 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-<meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>You Have Been Memed</title>
 <style>
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  html, body {
-    background: #000;
-    overflow: hidden;
-    width: 100%; height: 100%;
-    touch-action: none;
-    -webkit-tap-highlight-color: transparent;
-    -webkit-user-select: none; user-select: none;
+  *,*::before,*::after { margin:0; padding:0; box-sizing:border-box; }
+  html,body {
+    width:100%; height:100%;
+    background:#000;
+    overflow:hidden;
+    touch-action:none;
+    -webkit-tap-highlight-color:transparent;
+    -webkit-user-select:none; user-select:none;
   }
-  canvas { display: block; }
+  canvas { display:block; }
 </style>
 </head>
 <body>
 <canvas id="c"></canvas>
 <script>
+/* ─────────────────────────────────────────────
+   PERFORMANCE STRATEGY
+   • Background (grid + vignette + scanlines) is
+     painted ONCE to an offscreen canvas and
+     re-used every frame via drawImage.
+   • Monster frames are also pre-rendered once.
+   • Each game frame = 2 drawImage + text → fast
+     on any device.
+───────────────────────────────────────────── */
 
 const canvas = document.getElementById('c');
 const ctx    = canvas.getContext('2d');
 
-// ── Responsive config ───────────────────────────────────────
-let PX, GRID, FONT_MAIN, FONT_HINT, BOTTOM_PAD, SHADOW_BLUR;
+// ── Responsive config ───────────────────────
+let PX, GRID, FONT_MAIN, FONT_HINT, SAFE_B;
 
-function calcConfig() {
-  const W = canvas.width;
-  if (W <= 430) {           // phone portrait
-    PX = 18; GRID = 10; FONT_MAIN = 52; FONT_HINT = 18; BOTTOM_PAD = 90; SHADOW_BLUR = 24;
-  } else if (W <= 820) {    // tablet / phone landscape
-    PX = 14; GRID = 9;  FONT_MAIN = 44; FONT_HINT = 16; BOTTOM_PAD = 70; SHADOW_BLUR = 18;
-  } else {                   // desktop
-    PX = 10; GRID = 8;  FONT_MAIN = 38; FONT_HINT = 14; BOTTOM_PAD = 60; SHADOW_BLUR = 14;
-  }
+function setConfig() {
+  const W = Math.min(canvas.width, canvas.height); // portrait-first
+  PX      = W < 500 ? 16 : W < 900 ? 13 : 10;
+  GRID    = W < 500 ? 10 :  9;
+  FONT_MAIN = W < 500 ? 48 : W < 900 ? 42 : 36;
+  FONT_HINT = W < 500 ? 17 : 14;
+  SAFE_B    = W < 500 ? 80 : 60;
 }
 
-function resize() {
-  canvas.width  = window.innerWidth;
-  canvas.height = window.innerHeight;
-  calcConfig();
-  // reposition monster if it went off-screen
-  const mw = 11 * PX, mh = 9 * PX;
-  if (mx + mw > canvas.width)  mx = canvas.width  - mw - 10;
-  if (my + mh > canvas.height) my = canvas.height - mh - BOTTOM_PAD - 10;
-}
-
-// ── Colors ──────────────────────────────────────────────────
-const COLORS = {
-  1: '#9333ea',   // vivid purple body
-  2: '#07000f',   // near-black eyes
-  3: '#d8b4fe',   // light lavender highlight
-};
-
-// ── Sprite frames 11 × 9 ───────────────────────────────────
+// ── Sprite data ─────────────────────────────
+const COLORS = { 1:'#9333ea', 2:'#07000f', 3:'#d8b4fe' };
 const F = [
-  [ // Frame A
-    [0,0,1,0,0,0,0,0,1,0,0],
-    [0,0,0,1,1,1,1,1,0,0,0],
-    [0,1,1,1,1,1,1,1,1,1,0],
-    [1,1,3,2,1,1,1,2,3,1,1],
-    [1,1,2,2,1,1,1,2,2,1,1],
-    [1,1,1,1,1,1,1,1,1,1,1],
-    [1,1,1,0,1,1,1,0,1,1,1],
-    [0,1,0,0,0,0,0,0,0,1,0],
-    [0,0,1,0,0,0,0,0,1,0,0],
-  ],
-  [ // Frame B
-    [0,0,1,0,0,0,0,0,1,0,0],
-    [0,0,0,1,1,1,1,1,0,0,0],
-    [0,1,1,1,1,1,1,1,1,1,0],
-    [1,1,3,2,1,1,1,2,3,1,1],
-    [1,1,2,2,1,1,1,2,2,1,1],
-    [1,1,1,1,1,1,1,1,1,1,1],
-    [1,0,1,1,0,1,0,1,1,0,1],
-    [1,0,0,0,0,0,0,0,0,0,1],
-    [0,1,0,0,0,0,0,0,0,1,0],
-  ],
+  [[0,0,1,0,0,0,0,0,1,0,0],
+   [0,0,0,1,1,1,1,1,0,0,0],
+   [0,1,1,1,1,1,1,1,1,1,0],
+   [1,1,3,2,1,1,1,2,3,1,1],
+   [1,1,2,2,1,1,1,2,2,1,1],
+   [1,1,1,1,1,1,1,1,1,1,1],
+   [1,1,1,0,1,1,1,0,1,1,1],
+   [0,1,0,0,0,0,0,0,0,1,0],
+   [0,0,1,0,0,0,0,0,1,0,0]],
+  [[0,0,1,0,0,0,0,0,1,0,0],
+   [0,0,0,1,1,1,1,1,0,0,0],
+   [0,1,1,1,1,1,1,1,1,1,0],
+   [1,1,3,2,1,1,1,2,3,1,1],
+   [1,1,2,2,1,1,1,2,2,1,1],
+   [1,1,1,1,1,1,1,1,1,1,1],
+   [1,0,1,1,0,1,0,1,1,0,1],
+   [1,0,0,0,0,0,0,0,0,0,1],
+   [0,1,0,0,0,0,0,0,0,1,0]],
 ];
 
-// ── Monster state ───────────────────────────────────────────
-let mx = 80, my = 120;
-let vx = 1.4, vy = 1.1;
-let frame = 0, frameTick = 0;
-const FRAME_RATE = 18;
+// ── Offscreen caches ─────────────────────────
+let bgCache       = null;   // static background
+let spriteCache   = [];     // [offscreenCanvas, offscreenCanvas]
 
-// pulsing glow
-let glowTick = 0;
-
-// init sizing before first draw
-canvas.width  = window.innerWidth;
-canvas.height = window.innerHeight;
-calcConfig();
-window.addEventListener('resize', resize);
-
-// ── Background ──────────────────────────────────────────────
-function drawBackground() {
+function buildBg() {
   const W = canvas.width, H = canvas.height;
-  ctx.fillStyle = '#000';
-  ctx.fillRect(0, 0, W, H);
-  ctx.fillStyle = '#0e0e0e';
+  bgCache        = document.createElement('canvas');
+  bgCache.width  = W; bgCache.height = H;
+  const c = bgCache.getContext('2d');
+
+  // solid black
+  c.fillStyle = '#000';
+  c.fillRect(0, 0, W, H);
+
+  // pixel grid
+  c.fillStyle = '#0d0d0d';
   for (let x = 0; x < W; x += GRID)
     for (let y = 0; y < H; y += GRID)
-      ctx.fillRect(x, y, GRID - 1, GRID - 1);
+      c.fillRect(x, y, GRID - 1, GRID - 1);
+
+  // vignette
+  const grd = c.createRadialGradient(W/2,H/2, Math.min(W,H)*0.2, W/2,H/2, Math.max(W,H)*0.8);
+  grd.addColorStop(0,'rgba(0,0,0,0)');
+  grd.addColorStop(1,'rgba(0,0,0,0.65)');
+  c.fillStyle = grd;
+  c.fillRect(0, 0, W, H);
+
+  // scanlines
+  c.fillStyle = 'rgba(0,0,0,0.07)';
+  for (let y = 0; y < H; y += 4)
+    c.fillRect(0, y, W, 2);
 }
 
-// ── Vignette ────────────────────────────────────────────────
-function drawVignette() {
-  const cx = canvas.width / 2, cy = canvas.height / 2;
-  const r  = Math.max(cx, cy) * 1.1;
-  const g  = ctx.createRadialGradient(cx, cy, r * 0.35, cx, cy, r);
-  g.addColorStop(0, 'rgba(0,0,0,0)');
-  g.addColorStop(1, 'rgba(0,0,0,0.72)');
-  ctx.fillStyle = g;
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-}
+function buildSprites() {
+  const SW = 11 * PX + 8, SH = 9 * PX + 8;
+  spriteCache = F.map(grid => {
+    const sc = document.createElement('canvas');
+    sc.width = SW; sc.height = SH;
+    const c = sc.getContext('2d');
 
-// ── Scanlines ───────────────────────────────────────────────
-function drawScanlines() {
-  ctx.fillStyle = 'rgba(0,0,0,0.06)';
-  for (let y = 0; y < canvas.height; y += 4)
-    ctx.fillRect(0, y, canvas.width, 2);
-}
-
-// ── Monster ─────────────────────────────────────────────────
-function drawMonster(ox, oy, fi) {
-  const grid = F[fi];
-  const pulse = 0.5 + 0.5 * Math.sin(glowTick * 0.06); // 0..1
-
-  // drop shadow
-  grid.forEach((row, ry) =>
-    row.forEach((cell, rx) => {
+    // drop shadow (offset 4,4)
+    grid.forEach((row, ry) => row.forEach((cell, rx) => {
       if (!cell) return;
-      ctx.fillStyle = 'rgba(10,0,30,0.7)';
-      ctx.fillRect(ox + rx * PX + 4, oy + ry * PX + 4, PX, PX);
-    })
-  );
+      c.fillStyle = '#12003a';
+      c.fillRect(rx * PX + 4, ry * PX + 4, PX, PX);
+    }));
 
-  // glow pass
-  ctx.save();
-  ctx.shadowColor = '#a855f7';
-  ctx.shadowBlur  = SHADOW_BLUR + pulse * 14;
-  grid.forEach((row, ry) =>
-    row.forEach((cell, rx) => {
+    // purple glow — drawn once, baked in
+    c.save();
+    c.shadowColor = '#a855f7';
+    c.shadowBlur  = PX * 1.4;
+    grid.forEach((row, ry) => row.forEach((cell, rx) => {
       if (cell !== 1 && cell !== 3) return;
-      ctx.fillStyle = COLORS[cell];
-      ctx.fillRect(ox + rx * PX, oy + ry * PX, PX, PX);
-    })
-  );
-  ctx.restore();
+      c.fillStyle = COLORS[cell];
+      c.fillRect(rx * PX, ry * PX, PX, PX);
+    }));
+    c.restore();
 
-  // clean body pass (no blur, crisp pixels)
-  grid.forEach((row, ry) =>
-    row.forEach((cell, rx) => {
+    // crisp body on top
+    grid.forEach((row, ry) => row.forEach((cell, rx) => {
       if (!cell) return;
-      ctx.fillStyle = COLORS[cell];
-      ctx.fillRect(ox + rx * PX, oy + ry * PX, PX, PX);
-    })
-  );
+      c.fillStyle = COLORS[cell];
+      c.fillRect(rx * PX, ry * PX, PX, PX);
+    }));
+
+    return sc;
+  });
 }
 
-// ── Text ────────────────────────────────────────────────────
+function rebuild() {
+  setConfig();
+  buildBg();
+  buildSprites();
+}
+
+// ── Monster state ────────────────────────────
+let mx = 80, my = 100;
+let vx = 1.4, vy = 1.1;
+let frame = 0, ftick = 0;
+
+// ── Draw text (fast — just two fillText calls) ─
 function drawText() {
   ctx.save();
-  ctx.textAlign = 'center';
-
-  // "YOU HAVE BEEN MEMED"
+  ctx.textAlign    = 'center';
   ctx.textBaseline = 'bottom';
-  ctx.font = `900 ${FONT_MAIN}px Impact, 'Arial Black', sans-serif`;
-  ctx.lineWidth    = Math.ceil(FONT_MAIN / 9);
-  ctx.strokeStyle  = '#000';
-  ctx.strokeText('YOU HAVE BEEN MEMED', canvas.width / 2, canvas.height - BOTTOM_PAD / 2);
-  ctx.fillStyle = '#ffffff';
-  ctx.fillText('YOU HAVE BEEN MEMED',   canvas.width / 2, canvas.height - BOTTOM_PAD / 2);
+  ctx.font         = `900 ${FONT_MAIN}px Impact,'Arial Black',sans-serif`;
+  const y = canvas.height - SAFE_B / 3;
 
-  // tap-for-sound hint
+  ctx.lineWidth   = Math.ceil(FONT_MAIN / 8);
+  ctx.strokeStyle = '#000';
+  ctx.strokeText('YOU HAVE BEEN MEMED', canvas.width / 2, y);
+  ctx.fillStyle   = '#fff';
+  ctx.fillText('YOU HAVE BEEN MEMED',   canvas.width / 2, y);
+
   if (!audioStarted) {
     ctx.textBaseline = 'top';
     ctx.font         = `bold ${FONT_HINT}px monospace`;
     ctx.lineWidth    = 3;
     ctx.strokeStyle  = '#000';
-    ctx.strokeText('🔊 TAP FOR SOUND', canvas.width / 2, BOTTOM_PAD / 3);
+    ctx.strokeText('🔊 TAP FOR SOUND', canvas.width / 2, SAFE_B / 4);
     ctx.fillStyle    = 'rgba(255,255,255,0.6)';
-    ctx.fillText('🔊 TAP FOR SOUND',   canvas.width / 2, BOTTOM_PAD / 3);
+    ctx.fillText('🔊 TAP FOR SOUND',   canvas.width / 2, SAFE_B / 4);
   }
-
   ctx.restore();
 }
 
-// ── Main loop ───────────────────────────────────────────────
+// ── Game loop ────────────────────────────────
 function loop() {
   const MW = 11 * PX, MH = 9 * PX;
 
-  mx += vx;
-  my += vy;
+  mx += vx; my += vy;
 
-  if (mx <= 0)                              { mx = 0;                            vx =  Math.abs(vx); }
-  if (mx + MW >= canvas.width)              { mx = canvas.width  - MW;           vx = -Math.abs(vx); }
-  if (my <= 0)                              { my = 0;                            vy =  Math.abs(vy); }
-  if (my + MH >= canvas.height - BOTTOM_PAD) { my = canvas.height - MH - BOTTOM_PAD; vy = -Math.abs(vy); }
+  if (mx <= 0)                          { mx = 0;                        vx =  Math.abs(vx); }
+  if (mx + MW >= canvas.width)          { mx = canvas.width  - MW;       vx = -Math.abs(vx); }
+  if (my <= 0)                          { my = 0;                        vy =  Math.abs(vy); }
+  if (my + MH >= canvas.height - SAFE_B){ my = canvas.height - MH - SAFE_B; vy = -Math.abs(vy); }
 
-  if (++frameTick  >= FRAME_RATE) { frame = 1 - frame; frameTick = 0; }
-  glowTick++;
+  if (++ftick >= 18) { frame = 1 - frame; ftick = 0; }
 
-  drawBackground();
-  drawVignette();
-  drawMonster(Math.round(mx), Math.round(my), frame);
-  drawScanlines();
+  // ← single drawImage instead of thousands of fillRects
+  ctx.drawImage(bgCache, 0, 0);
+  ctx.drawImage(spriteCache[frame], Math.round(mx), Math.round(my));
   drawText();
 
   requestAnimationFrame(loop);
 }
 
+// ── Init & resize ────────────────────────────
+function init() {
+  canvas.width  = window.innerWidth;
+  canvas.height = window.innerHeight;
+  rebuild();
+}
+
+init();
+window.addEventListener('resize', () => { init(); });
 loop();
 
-// ── Chiptune ────────────────────────────────────────────────
+// ── Chiptune (Web Audio API) ─────────────────
 const N = {
   _:0,
   C4:261.63,D4:293.66,E4:329.63,F4:349.23,G4:392,A4:440,B4:493.88,Bb4:466.16,
-  C5:523.25,D5:587.33,E5:659.25,F5:698.46,G5:783.99,A5:880,Cs5:554.37,Fs4:369.99,
+  C5:523.25,D5:587.33,E5:659.25,F5:698.46,G5:783.99,A5:880,Fs4:369.99,
 };
-
 const MELODY = [
   [N.E5,.25],[N.E5,.25],[N._,.25],[N.E5,.25],[N._,.25],[N.C5,.25],[N.E5,.5],
   [N.G5,.5],[N._,.5],[N.G4,.5],[N._,.5],
@@ -238,7 +226,6 @@ const MELODY = [
   [N._,.25],[N.G5,.33],[N.Fs4,.33],[N.F5,.33],[N.D5,.5],
   [N.C5,.25],[N.C5,.25],[N._,.5],
 ];
-
 const BASS = [
   [N.C4,.5],[N.C4,.5],[N.G4,.5],[N.G4,.5],
   [N.A4,.5],[N.A4,.5],[N.F4,.5],[N.F4,.5],
@@ -248,52 +235,51 @@ const BASS = [
   [N.A4,.5],[N.A4,.5],[N.F4,.5],[N.F4,.5],
 ];
 
-let audioCtx    = null;
-let audioStarted = false;
+let audioCtx = null, audioStarted = false;
 
 function scheduleNotes(notes, type, gain, bps, t0) {
   let t = t0;
-  notes.forEach(([freq, beats]) => {
-    const dur = beats / bps;
-    if (freq > 0) {
+  notes.forEach(([f, b]) => {
+    const d = b / bps;
+    if (f > 0) {
       const osc = audioCtx.createOscillator();
       const g   = audioCtx.createGain();
       osc.connect(g); g.connect(audioCtx.destination);
       osc.type = type;
-      osc.frequency.setValueAtTime(freq, t);
+      osc.frequency.setValueAtTime(f, t);
       g.gain.setValueAtTime(gain, t);
-      g.gain.exponentialRampToValueAtTime(0.0001, t + dur - 0.01);
-      osc.start(t); osc.stop(t + dur);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + d - 0.01);
+      osc.start(t); osc.stop(t + d);
     }
-    t += dur;
+    t += d;
   });
   return t;
 }
 
-function startLoop() {
+function startMusic() {
   if (audioStarted) return;
   audioStarted = true;
   const BPS = 180 / 60;
-  function tick() {
+  (function tick() {
     const now = audioCtx.currentTime;
-    const e1  = scheduleNotes(MELODY, 'square',   0.07, BPS, now);
-    const e2  = scheduleNotes(BASS,   'triangle', 0.05, BPS, now);
-    setTimeout(tick, (Math.max(e1, e2) - now) * 1000 - 120);
-  }
-  tick();
+    const e1  = scheduleNotes(MELODY,'square',  0.07, BPS, now);
+    const e2  = scheduleNotes(BASS,  'triangle',0.05, BPS, now);
+    setTimeout(tick, (Math.max(e1,e2) - now) * 1000 - 100);
+  })();
 }
 
-function tryStart() {
+function tryAudio() {
   if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-  if (audioCtx.state === 'suspended') audioCtx.resume().then(startLoop);
-  else startLoop();
+  const go = () => startMusic();
+  audioCtx.state === 'suspended' ? audioCtx.resume().then(go) : go();
 }
 
-window.addEventListener('load', tryStart);
-['click','touchstart','pointerdown','keydown'].forEach(e =>
-  document.addEventListener(e, tryStart, { once: true })
+// Try immediately (works on desktop / Electron)
+window.addEventListener('load', tryAudio);
+// Guaranteed to work on mobile after any touch/click
+['touchstart','pointerdown','click','keydown'].forEach(ev =>
+  document.addEventListener(ev, tryAudio, { once: true })
 );
-
 </script>
 </body>
 </html>
