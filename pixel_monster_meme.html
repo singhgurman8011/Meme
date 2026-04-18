@@ -2,10 +2,21 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>You Have Been Memed</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { background: #000; overflow: hidden; }
+  html, body {
+    background: #000;
+    overflow: hidden;
+    width: 100%; height: 100%;
+    touch-action: none;
+    -webkit-tap-highlight-color: transparent;
+    -webkit-user-select: none; user-select: none;
+  }
   canvas { display: block; }
 </style>
 </head>
@@ -16,27 +27,38 @@
 const canvas = document.getElementById('c');
 const ctx    = canvas.getContext('2d');
 
+// ── Responsive config ───────────────────────────────────────
+let PX, GRID, FONT_MAIN, FONT_HINT, BOTTOM_PAD, SHADOW_BLUR;
+
+function calcConfig() {
+  const W = canvas.width;
+  if (W <= 430) {           // phone portrait
+    PX = 18; GRID = 10; FONT_MAIN = 52; FONT_HINT = 18; BOTTOM_PAD = 90; SHADOW_BLUR = 24;
+  } else if (W <= 820) {    // tablet / phone landscape
+    PX = 14; GRID = 9;  FONT_MAIN = 44; FONT_HINT = 16; BOTTOM_PAD = 70; SHADOW_BLUR = 18;
+  } else {                   // desktop
+    PX = 10; GRID = 8;  FONT_MAIN = 38; FONT_HINT = 14; BOTTOM_PAD = 60; SHADOW_BLUR = 14;
+  }
+}
+
 function resize() {
   canvas.width  = window.innerWidth;
   canvas.height = window.innerHeight;
+  calcConfig();
+  // reposition monster if it went off-screen
+  const mw = 11 * PX, mh = 9 * PX;
+  if (mx + mw > canvas.width)  mx = canvas.width  - mw - 10;
+  if (my + mh > canvas.height) my = canvas.height - mh - BOTTOM_PAD - 10;
 }
-resize();
-window.addEventListener('resize', resize);
 
-// ── Pixel grid size ─────────────────────────────────────────
-const GRID = 8;
-
-// ── Sprite pixel size ───────────────────────────────────────
-const PX = 10;
-
-// 0=transparent 1=purple-body 2=dark-eye 3=light-highlight
+// ── Colors ──────────────────────────────────────────────────
 const COLORS = {
-  1: '#9333ea',
-  2: '#0a0014',
-  3: '#c084fc',
+  1: '#9333ea',   // vivid purple body
+  2: '#07000f',   // near-black eyes
+  3: '#d8b4fe',   // light lavender highlight
 };
 
-// ── Two animation frames 11 × 9 ────────────────────────────
+// ── Sprite frames 11 × 9 ───────────────────────────────────
 const F = [
   [ // Frame A
     [0,0,1,0,0,0,0,0,1,0,0],
@@ -62,40 +84,78 @@ const F = [
   ],
 ];
 
-const MW = F[0][0].length * PX;
-const MH = F[0].length    * PX;
-
 // ── Monster state ───────────────────────────────────────────
-let mx = 160, my = 140;
-let vx = 1.6, vy = 1.3;   // slow & chill
+let mx = 80, my = 120;
+let vx = 1.4, vy = 1.1;
 let frame = 0, frameTick = 0;
-const FRAME_RATE = 20;
+const FRAME_RATE = 18;
 
-// ── Draw pixel background ───────────────────────────────────
+// pulsing glow
+let glowTick = 0;
+
+// init sizing before first draw
+canvas.width  = window.innerWidth;
+canvas.height = window.innerHeight;
+calcConfig();
+window.addEventListener('resize', resize);
+
+// ── Background ──────────────────────────────────────────────
 function drawBackground() {
   const W = canvas.width, H = canvas.height;
   ctx.fillStyle = '#000';
   ctx.fillRect(0, 0, W, H);
-  ctx.fillStyle = '#0d0d0d';
+  ctx.fillStyle = '#0e0e0e';
   for (let x = 0; x < W; x += GRID)
     for (let y = 0; y < H; y += GRID)
       ctx.fillRect(x, y, GRID - 1, GRID - 1);
 }
 
-// ── Draw monster ────────────────────────────────────────────
+// ── Vignette ────────────────────────────────────────────────
+function drawVignette() {
+  const cx = canvas.width / 2, cy = canvas.height / 2;
+  const r  = Math.max(cx, cy) * 1.1;
+  const g  = ctx.createRadialGradient(cx, cy, r * 0.35, cx, cy, r);
+  g.addColorStop(0, 'rgba(0,0,0,0)');
+  g.addColorStop(1, 'rgba(0,0,0,0.72)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+}
+
+// ── Scanlines ───────────────────────────────────────────────
+function drawScanlines() {
+  ctx.fillStyle = 'rgba(0,0,0,0.06)';
+  for (let y = 0; y < canvas.height; y += 4)
+    ctx.fillRect(0, y, canvas.width, 2);
+}
+
+// ── Monster ─────────────────────────────────────────────────
 function drawMonster(ox, oy, fi) {
   const grid = F[fi];
+  const pulse = 0.5 + 0.5 * Math.sin(glowTick * 0.06); // 0..1
 
-  // shadow
+  // drop shadow
   grid.forEach((row, ry) =>
     row.forEach((cell, rx) => {
       if (!cell) return;
-      ctx.fillStyle = '#1a003a';
-      ctx.fillRect(ox + rx * PX + 3, oy + ry * PX + 3, PX, PX);
+      ctx.fillStyle = 'rgba(10,0,30,0.7)';
+      ctx.fillRect(ox + rx * PX + 4, oy + ry * PX + 4, PX, PX);
     })
   );
 
-  // body
+  // glow pass
+  ctx.save();
+  ctx.shadowColor = '#a855f7';
+  ctx.shadowBlur  = SHADOW_BLUR + pulse * 14;
+  grid.forEach((row, ry) =>
+    row.forEach((cell, rx) => {
+      if (cell !== 1 && cell !== 3) return;
+      ctx.fillStyle = COLORS[cell];
+      ctx.fillRect(ox + rx * PX, oy + ry * PX, PX, PX);
+    })
+  );
+  ctx.restore();
+
+  // clean body pass (no blur, crisp pixels)
   grid.forEach((row, ry) =>
     row.forEach((cell, rx) => {
       if (!cell) return;
@@ -105,47 +165,53 @@ function drawMonster(ox, oy, fi) {
   );
 }
 
-// ── Bottom meme text ────────────────────────────────────────
+// ── Text ────────────────────────────────────────────────────
 function drawText() {
-  const txt = 'YOU HAVE BEEN MEMED';
   ctx.save();
-  ctx.textAlign    = 'center';
-  ctx.textBaseline = 'bottom';
-  ctx.font         = 'bold 36px Impact, Arial Black, sans-serif';
-  ctx.strokeStyle  = '#000';
-  ctx.lineWidth    = 6;
-  ctx.strokeText(txt, canvas.width / 2, canvas.height - 14);
-  ctx.fillStyle    = '#ffffff';
-  ctx.fillText(txt, canvas.width / 2, canvas.height - 14);
+  ctx.textAlign = 'center';
 
-  // sound hint — fades out once audio is running
+  // "YOU HAVE BEEN MEMED"
+  ctx.textBaseline = 'bottom';
+  ctx.font = `900 ${FONT_MAIN}px Impact, 'Arial Black', sans-serif`;
+  ctx.lineWidth    = Math.ceil(FONT_MAIN / 9);
+  ctx.strokeStyle  = '#000';
+  ctx.strokeText('YOU HAVE BEEN MEMED', canvas.width / 2, canvas.height - BOTTOM_PAD / 2);
+  ctx.fillStyle = '#ffffff';
+  ctx.fillText('YOU HAVE BEEN MEMED',   canvas.width / 2, canvas.height - BOTTOM_PAD / 2);
+
+  // tap-for-sound hint
   if (!audioStarted) {
-    ctx.font         = 'bold 14px monospace';
     ctx.textBaseline = 'top';
-    ctx.strokeStyle  = '#000';
+    ctx.font         = `bold ${FONT_HINT}px monospace`;
     ctx.lineWidth    = 3;
-    const hint = '🔊 click anywhere for sound';
-    ctx.strokeText(hint, canvas.width / 2, 12);
-    ctx.fillStyle = 'rgba(255,255,255,0.55)';
-    ctx.fillText(hint,   canvas.width / 2, 12);
+    ctx.strokeStyle  = '#000';
+    ctx.strokeText('🔊 TAP FOR SOUND', canvas.width / 2, BOTTOM_PAD / 3);
+    ctx.fillStyle    = 'rgba(255,255,255,0.6)';
+    ctx.fillText('🔊 TAP FOR SOUND',   canvas.width / 2, BOTTOM_PAD / 3);
   }
+
   ctx.restore();
 }
 
 // ── Main loop ───────────────────────────────────────────────
 function loop() {
+  const MW = 11 * PX, MH = 9 * PX;
+
   mx += vx;
   my += vy;
 
-  if (mx <= 0)                  { mx = 0;                  vx =  Math.abs(vx); }
-  if (mx + MW >= canvas.width)  { mx = canvas.width  - MW; vx = -Math.abs(vx); }
-  if (my <= 0)                  { my = 0;                  vy =  Math.abs(vy); }
-  if (my + MH >= canvas.height - 50) { my = canvas.height - MH - 50; vy = -Math.abs(vy); }
+  if (mx <= 0)                              { mx = 0;                            vx =  Math.abs(vx); }
+  if (mx + MW >= canvas.width)              { mx = canvas.width  - MW;           vx = -Math.abs(vx); }
+  if (my <= 0)                              { my = 0;                            vy =  Math.abs(vy); }
+  if (my + MH >= canvas.height - BOTTOM_PAD) { my = canvas.height - MH - BOTTOM_PAD; vy = -Math.abs(vy); }
 
-  if (++frameTick >= FRAME_RATE) { frame = 1 - frame; frameTick = 0; }
+  if (++frameTick  >= FRAME_RATE) { frame = 1 - frame; frameTick = 0; }
+  glowTick++;
 
   drawBackground();
+  drawVignette();
   drawMonster(Math.round(mx), Math.round(my), frame);
+  drawScanlines();
   drawText();
 
   requestAnimationFrame(loop);
@@ -156,9 +222,8 @@ loop();
 // ── Chiptune ────────────────────────────────────────────────
 const N = {
   _:0,
-  C4:261.63, D4:293.66, E4:329.63, F4:349.23, G4:392,   A4:440,   B4:493.88, Bb4:466.16,
-  C5:523.25, D5:587.33, E5:659.25, F5:698.46, G5:783.99, A5:880,   B5:987.77,
-  Cs5:554.37, Fs4:369.99,
+  C4:261.63,D4:293.66,E4:329.63,F4:349.23,G4:392,A4:440,B4:493.88,Bb4:466.16,
+  C5:523.25,D5:587.33,E5:659.25,F5:698.46,G5:783.99,A5:880,Cs5:554.37,Fs4:369.99,
 };
 
 const MELODY = [
@@ -186,21 +251,19 @@ const BASS = [
 let audioCtx    = null;
 let audioStarted = false;
 
-function scheduleNotes(notes, type, gain, bps, startT) {
-  let t = startT;
+function scheduleNotes(notes, type, gain, bps, t0) {
+  let t = t0;
   notes.forEach(([freq, beats]) => {
     const dur = beats / bps;
     if (freq > 0) {
       const osc = audioCtx.createOscillator();
       const g   = audioCtx.createGain();
-      osc.connect(g);
-      g.connect(audioCtx.destination);
+      osc.connect(g); g.connect(audioCtx.destination);
       osc.type = type;
       osc.frequency.setValueAtTime(freq, t);
       g.gain.setValueAtTime(gain, t);
       g.gain.exponentialRampToValueAtTime(0.0001, t + dur - 0.01);
-      osc.start(t);
-      osc.stop(t + dur);
+      osc.start(t); osc.stop(t + dur);
     }
     t += dur;
   });
@@ -226,10 +289,7 @@ function tryStart() {
   else startLoop();
 }
 
-// Try on load (works in Electron / some desktop browsers)
 window.addEventListener('load', tryStart);
-
-// Any interaction unlocks audio in strict browsers
 ['click','touchstart','pointerdown','keydown'].forEach(e =>
   document.addEventListener(e, tryStart, { once: true })
 );
