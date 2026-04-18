@@ -2,20 +2,12 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
-<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>You Have Been Memed</title>
 <style>
-  * { margin:0; padding:0; box-sizing:border-box; }
-  html, body {
-    width:100%; height:100%;
-    background:#000;
-    overflow:hidden;
-    touch-action:none;
-    -webkit-user-select:none;
-    user-select:none;
-  }
-  canvas { display:block; }
+  * { margin: 0; padding: 0; }
+  body { background: #000; overflow: hidden; }
+  canvas { display: block; }
 </style>
 </head>
 <body>
@@ -23,34 +15,23 @@
 <script>
 
 const canvas = document.getElementById('c');
-const ctx    = canvas.getContext('2d');
+const ctx = canvas.getContext('2d');
 
-// ── Sizes (set once, updated on resize) ─────
-let PX = 14, GRID = 10, FS = 46, SAFE = 80;
-let gridPat = null;   // CSS-style repeating pattern — 2 fillRect per frame
+canvas.width  = window.innerWidth;
+canvas.height = window.innerHeight;
 
-function recalc() {
-  const W = window.innerWidth;
-  PX   = W < 500 ? 14 : W < 900 ? 11 : 9;
-  GRID = W < 500 ? 10 : 8;
-  FS   = W < 500 ? 46 : W < 900 ? 40 : 34;
-  SAFE = W < 500 ? 80 : 60;
-  buildPattern();
-}
+window.addEventListener('resize', () => {
+  canvas.width  = window.innerWidth;
+  canvas.height = window.innerHeight;
+});
 
-// Build tiny tile once → canvas fills it as a pattern (1 GPU call)
-function buildPattern() {
-  const t  = document.createElement('canvas');
-  t.width  = GRID; t.height = GRID;
-  const tc = t.getContext('2d');
-  tc.fillStyle = '#111';
-  tc.fillRect(0, 0, GRID - 1, GRID - 1);
-  gridPat = ctx.createPattern(t, 'repeat');
-}
+// sprite pixel size
+const PX = 12;
 
-// ── Sprite maps ──────────────────────────────
-const COL = { 1:'#9333ea', 2:'#06000e', 3:'#d8b4fe' };
-const SPR = [
+// colors: 0=empty  1=purple  2=dark eye  3=light purple
+const COL = { 1:'#9333ea', 2:'#0a0014', 3:'#c084fc' };
+
+const FRAMES = [
   [[0,0,1,0,0,0,0,0,1,0,0],
    [0,0,0,1,1,1,1,1,0,0,0],
    [0,1,1,1,1,1,1,1,1,1,0],
@@ -60,6 +41,7 @@ const SPR = [
    [1,1,1,0,1,1,1,0,1,1,1],
    [0,1,0,0,0,0,0,0,0,1,0],
    [0,0,1,0,0,0,0,0,1,0,0]],
+
   [[0,0,1,0,0,0,0,0,1,0,0],
    [0,0,0,1,1,1,1,1,0,0,0],
    [0,1,1,1,1,1,1,1,1,1,0],
@@ -71,101 +53,79 @@ const SPR = [
    [0,1,0,0,0,0,0,0,0,1,0]],
 ];
 
-// Draw monster — pure fillRect, NO ctx.shadow (shadow API is the perf killer on mobile)
-function drawMonster(ox, oy, fi) {
-  const g = SPR[fi];
-  // outer glow: slightly expanded tinted squares behind body
-  g.forEach((row, ry) => row.forEach((cell, rx) => {
-    if (cell !== 1 && cell !== 3) return;
-    ctx.fillStyle = 'rgba(168,85,247,0.35)';
-    ctx.fillRect(ox + rx*PX - 2, oy + ry*PX - 2, PX+4, PX+4);
-  }));
-  // drop shadow (manual offset)
-  g.forEach((row, ry) => row.forEach((cell, rx) => {
-    if (!cell) return;
-    ctx.fillStyle = '#1a0038';
-    ctx.fillRect(ox + rx*PX + 3, oy + ry*PX + 3, PX, PX);
-  }));
-  // body
-  g.forEach((row, ry) => row.forEach((cell, rx) => {
-    if (!cell) return;
-    ctx.fillStyle = COL[cell];
-    ctx.fillRect(ox + rx*PX, oy + ry*PX, PX, PX);
-  }));
+const MW = 11 * PX;
+const MH =  9 * PX;
+
+let mx = 100, my = 100;
+let vx = 2, vy = 1.5;
+let frame = 0, tick = 0;
+
+function drawMonster(x, y, f) {
+  FRAMES[f].forEach((row, ry) => {
+    row.forEach((cell, rx) => {
+      if (!cell) return;
+      // shadow
+      ctx.fillStyle = '#1a003a';
+      ctx.fillRect(x + rx*PX + 3, y + ry*PX + 3, PX, PX);
+    });
+  });
+  FRAMES[f].forEach((row, ry) => {
+    row.forEach((cell, rx) => {
+      if (!cell) return;
+      ctx.fillStyle = COL[cell];
+      ctx.fillRect(x + rx*PX, y + ry*PX, PX, PX);
+    });
+  });
 }
 
-// ── State ────────────────────────────────────
-let mx = 60, my = 100, vx = 1.4, vy = 1.1;
-let fr = 0, ft = 0;
-
-// ── Text ─────────────────────────────────────
 let audioStarted = false;
 
 function drawText() {
   const W = canvas.width, H = canvas.height;
   ctx.save();
-  ctx.textAlign = 'center';
-
-  // bottom text
-  ctx.font         = `900 ${FS}px Impact,'Arial Black',sans-serif`;
+  ctx.textAlign    = 'center';
   ctx.textBaseline = 'bottom';
-  ctx.lineWidth    = FS / 7 | 0;
+  ctx.font         = 'bold 38px Impact, Arial Black, sans-serif';
+  ctx.lineWidth    = 6;
   ctx.strokeStyle  = '#000';
-  ctx.strokeText('YOU HAVE BEEN MEMED', W/2, H - 18);
-  ctx.fillStyle = '#fff';
-  ctx.fillText('YOU HAVE BEEN MEMED',   W/2, H - 18);
+  ctx.strokeText('YOU HAVE BEEN MEMED', W/2, H - 20);
+  ctx.fillStyle    = '#fff';
+  ctx.fillText('YOU HAVE BEEN MEMED',   W/2, H - 20);
 
-  // tap hint
   if (!audioStarted) {
-    ctx.font         = `bold ${FS*0.35|0}px monospace`;
+    ctx.font         = 'bold 15px monospace';
     ctx.textBaseline = 'top';
     ctx.lineWidth    = 3;
-    ctx.strokeStyle  = '#000';
-    ctx.strokeText('🔊 TAP FOR SOUND', W/2, 16);
-    ctx.fillStyle    = 'rgba(255,255,255,0.65)';
-    ctx.fillText('🔊 TAP FOR SOUND',   W/2, 16);
+    ctx.strokeText('🔊 tap for sound', W/2, 16);
+    ctx.fillStyle    = 'rgba(255,255,255,0.6)';
+    ctx.fillText('🔊 tap for sound',   W/2, 16);
   }
   ctx.restore();
 }
 
-// ── Loop ─────────────────────────────────────
 function loop() {
-  const W  = canvas.width, H = canvas.height;
-  const MW = 11 * PX, MH = 9 * PX;
+  const W = canvas.width, H = canvas.height;
 
-  // move
-  mx += vx; my += vy;
-  if (mx <= 0)          { mx = 0;      vx =  Math.abs(vx); }
-  if (mx + MW >= W)     { mx = W - MW; vx = -Math.abs(vx); }
-  if (my <= 0)          { my = 0;      vy =  Math.abs(vy); }
-  if (my + MH >= H - SAFE) { my = H - MH - SAFE; vy = -Math.abs(vy); }
+  mx += vx;  my += vy;
+  if (mx <= 0)          { mx = 0;       vx =  Math.abs(vx); }
+  if (mx + MW >= W)     { mx = W - MW;  vx = -Math.abs(vx); }
+  if (my <= 0)          { my = 0;       vy =  Math.abs(vy); }
+  if (my + MH >= H - 60){ my = H-MH-60; vy = -Math.abs(vy); }
 
-  if (++ft >= 18) { fr = 1 - fr; ft = 0; }
+  if (++tick >= 18) { frame = 1 - frame; tick = 0; }
 
-  // draw — 2 fillRect for entire background
   ctx.fillStyle = '#000';
   ctx.fillRect(0, 0, W, H);
-  ctx.fillStyle = gridPat;
-  ctx.fillRect(0, 0, W, H);
 
-  drawMonster(Math.round(mx), Math.round(my), fr);
+  drawMonster(Math.round(mx), Math.round(my), frame);
   drawText();
 
   requestAnimationFrame(loop);
 }
 
-// ── Init ─────────────────────────────────────
-function init() {
-  canvas.width  = window.innerWidth;
-  canvas.height = window.innerHeight;
-  recalc();
-}
-
-init();
-window.addEventListener('resize', init);
 loop();
 
-// ── Chiptune ─────────────────────────────────
+// ── audio ─────────────────────────────────
 const N = {
   _:0,
   C4:261.63,D4:293.66,E4:329.63,F4:349.23,G4:392,A4:440,B4:493.88,Bb4:466.16,
@@ -196,7 +156,7 @@ let AC = null;
 
 function sched(notes, type, vol, bps, t0) {
   let t = t0;
-  notes.forEach(([f,b]) => {
+  notes.forEach(([f, b]) => {
     const d = b / bps;
     if (f > 0) {
       const o = AC.createOscillator(), g = AC.createGain();
@@ -215,12 +175,12 @@ function sched(notes, type, vol, bps, t0) {
 function startMusic() {
   if (audioStarted) return;
   audioStarted = true;
-  const BPS = 3;   // 180 bpm
+  const BPS = 3;
   (function tick() {
     const now = AC.currentTime;
-    const e1  = sched(MEL,'square',  0.07, BPS, now);
-    const e2  = sched(BSS,'triangle',0.05, BPS, now);
-    setTimeout(tick, (Math.max(e1,e2) - now)*1000 - 100);
+    const e1  = sched(MEL, 'square',   0.07, BPS, now);
+    const e2  = sched(BSS, 'triangle', 0.05, BPS, now);
+    setTimeout(tick, (Math.max(e1, e2) - now) * 1000 - 100);
   })();
 }
 
