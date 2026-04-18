@@ -2,19 +2,18 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>You Have Been Memed</title>
 <style>
-  *,*::before,*::after { margin:0; padding:0; box-sizing:border-box; }
-  html,body {
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html, body {
     width:100%; height:100%;
     background:#000;
     overflow:hidden;
     touch-action:none;
-    -webkit-tap-highlight-color:transparent;
-    -webkit-user-select:none; user-select:none;
+    -webkit-user-select:none;
+    user-select:none;
   }
   canvas { display:block; }
 </style>
@@ -22,34 +21,36 @@
 <body>
 <canvas id="c"></canvas>
 <script>
-/* ─────────────────────────────────────────────
-   PERFORMANCE STRATEGY
-   • Background (grid + vignette + scanlines) is
-     painted ONCE to an offscreen canvas and
-     re-used every frame via drawImage.
-   • Monster frames are also pre-rendered once.
-   • Each game frame = 2 drawImage + text → fast
-     on any device.
-───────────────────────────────────────────── */
 
 const canvas = document.getElementById('c');
 const ctx    = canvas.getContext('2d');
 
-// ── Responsive config ───────────────────────
-let PX, GRID, FONT_MAIN, FONT_HINT, SAFE_B;
+// ── Sizes (set once, updated on resize) ─────
+let PX = 14, GRID = 10, FS = 46, SAFE = 80;
+let gridPat = null;   // CSS-style repeating pattern — 2 fillRect per frame
 
-function setConfig() {
-  const W = Math.min(canvas.width, canvas.height); // portrait-first
-  PX      = W < 500 ? 16 : W < 900 ? 13 : 10;
-  GRID    = W < 500 ? 10 :  9;
-  FONT_MAIN = W < 500 ? 48 : W < 900 ? 42 : 36;
-  FONT_HINT = W < 500 ? 17 : 14;
-  SAFE_B    = W < 500 ? 80 : 60;
+function recalc() {
+  const W = window.innerWidth;
+  PX   = W < 500 ? 14 : W < 900 ? 11 : 9;
+  GRID = W < 500 ? 10 : 8;
+  FS   = W < 500 ? 46 : W < 900 ? 40 : 34;
+  SAFE = W < 500 ? 80 : 60;
+  buildPattern();
 }
 
-// ── Sprite data ─────────────────────────────
-const COLORS = { 1:'#9333ea', 2:'#07000f', 3:'#d8b4fe' };
-const F = [
+// Build tiny tile once → canvas fills it as a pattern (1 GPU call)
+function buildPattern() {
+  const t  = document.createElement('canvas');
+  t.width  = GRID; t.height = GRID;
+  const tc = t.getContext('2d');
+  tc.fillStyle = '#111';
+  tc.fillRect(0, 0, GRID - 1, GRID - 1);
+  gridPat = ctx.createPattern(t, 'repeat');
+}
+
+// ── Sprite maps ──────────────────────────────
+const COL = { 1:'#9333ea', 2:'#06000e', 3:'#d8b4fe' };
+const SPR = [
   [[0,0,1,0,0,0,0,0,1,0,0],
    [0,0,0,1,1,1,1,1,0,0,0],
    [0,1,1,1,1,1,1,1,1,1,0],
@@ -70,151 +71,107 @@ const F = [
    [0,1,0,0,0,0,0,0,0,1,0]],
 ];
 
-// ── Offscreen caches ─────────────────────────
-let bgCache       = null;   // static background
-let spriteCache   = [];     // [offscreenCanvas, offscreenCanvas]
-
-function buildBg() {
-  const W = canvas.width, H = canvas.height;
-  bgCache        = document.createElement('canvas');
-  bgCache.width  = W; bgCache.height = H;
-  const c = bgCache.getContext('2d');
-
-  // solid black
-  c.fillStyle = '#000';
-  c.fillRect(0, 0, W, H);
-
-  // pixel grid
-  c.fillStyle = '#0d0d0d';
-  for (let x = 0; x < W; x += GRID)
-    for (let y = 0; y < H; y += GRID)
-      c.fillRect(x, y, GRID - 1, GRID - 1);
-
-  // vignette
-  const grd = c.createRadialGradient(W/2,H/2, Math.min(W,H)*0.2, W/2,H/2, Math.max(W,H)*0.8);
-  grd.addColorStop(0,'rgba(0,0,0,0)');
-  grd.addColorStop(1,'rgba(0,0,0,0.65)');
-  c.fillStyle = grd;
-  c.fillRect(0, 0, W, H);
-
-  // scanlines
-  c.fillStyle = 'rgba(0,0,0,0.07)';
-  for (let y = 0; y < H; y += 4)
-    c.fillRect(0, y, W, 2);
+// Draw monster — pure fillRect, NO ctx.shadow (shadow API is the perf killer on mobile)
+function drawMonster(ox, oy, fi) {
+  const g = SPR[fi];
+  // outer glow: slightly expanded tinted squares behind body
+  g.forEach((row, ry) => row.forEach((cell, rx) => {
+    if (cell !== 1 && cell !== 3) return;
+    ctx.fillStyle = 'rgba(168,85,247,0.35)';
+    ctx.fillRect(ox + rx*PX - 2, oy + ry*PX - 2, PX+4, PX+4);
+  }));
+  // drop shadow (manual offset)
+  g.forEach((row, ry) => row.forEach((cell, rx) => {
+    if (!cell) return;
+    ctx.fillStyle = '#1a0038';
+    ctx.fillRect(ox + rx*PX + 3, oy + ry*PX + 3, PX, PX);
+  }));
+  // body
+  g.forEach((row, ry) => row.forEach((cell, rx) => {
+    if (!cell) return;
+    ctx.fillStyle = COL[cell];
+    ctx.fillRect(ox + rx*PX, oy + ry*PX, PX, PX);
+  }));
 }
 
-function buildSprites() {
-  const SW = 11 * PX + 8, SH = 9 * PX + 8;
-  spriteCache = F.map(grid => {
-    const sc = document.createElement('canvas');
-    sc.width = SW; sc.height = SH;
-    const c = sc.getContext('2d');
+// ── State ────────────────────────────────────
+let mx = 60, my = 100, vx = 1.4, vy = 1.1;
+let fr = 0, ft = 0;
 
-    // drop shadow (offset 4,4)
-    grid.forEach((row, ry) => row.forEach((cell, rx) => {
-      if (!cell) return;
-      c.fillStyle = '#12003a';
-      c.fillRect(rx * PX + 4, ry * PX + 4, PX, PX);
-    }));
+// ── Text ─────────────────────────────────────
+let audioStarted = false;
 
-    // purple glow — drawn once, baked in
-    c.save();
-    c.shadowColor = '#a855f7';
-    c.shadowBlur  = PX * 1.4;
-    grid.forEach((row, ry) => row.forEach((cell, rx) => {
-      if (cell !== 1 && cell !== 3) return;
-      c.fillStyle = COLORS[cell];
-      c.fillRect(rx * PX, ry * PX, PX, PX);
-    }));
-    c.restore();
-
-    // crisp body on top
-    grid.forEach((row, ry) => row.forEach((cell, rx) => {
-      if (!cell) return;
-      c.fillStyle = COLORS[cell];
-      c.fillRect(rx * PX, ry * PX, PX, PX);
-    }));
-
-    return sc;
-  });
-}
-
-function rebuild() {
-  setConfig();
-  buildBg();
-  buildSprites();
-}
-
-// ── Monster state ────────────────────────────
-let mx = 80, my = 100;
-let vx = 1.4, vy = 1.1;
-let frame = 0, ftick = 0;
-
-// ── Draw text (fast — just two fillText calls) ─
 function drawText() {
+  const W = canvas.width, H = canvas.height;
   ctx.save();
-  ctx.textAlign    = 'center';
+  ctx.textAlign = 'center';
+
+  // bottom text
+  ctx.font         = `900 ${FS}px Impact,'Arial Black',sans-serif`;
   ctx.textBaseline = 'bottom';
-  ctx.font         = `900 ${FONT_MAIN}px Impact,'Arial Black',sans-serif`;
-  const y = canvas.height - SAFE_B / 3;
+  ctx.lineWidth    = FS / 7 | 0;
+  ctx.strokeStyle  = '#000';
+  ctx.strokeText('YOU HAVE BEEN MEMED', W/2, H - 18);
+  ctx.fillStyle = '#fff';
+  ctx.fillText('YOU HAVE BEEN MEMED',   W/2, H - 18);
 
-  ctx.lineWidth   = Math.ceil(FONT_MAIN / 8);
-  ctx.strokeStyle = '#000';
-  ctx.strokeText('YOU HAVE BEEN MEMED', canvas.width / 2, y);
-  ctx.fillStyle   = '#fff';
-  ctx.fillText('YOU HAVE BEEN MEMED',   canvas.width / 2, y);
-
+  // tap hint
   if (!audioStarted) {
+    ctx.font         = `bold ${FS*0.35|0}px monospace`;
     ctx.textBaseline = 'top';
-    ctx.font         = `bold ${FONT_HINT}px monospace`;
     ctx.lineWidth    = 3;
     ctx.strokeStyle  = '#000';
-    ctx.strokeText('🔊 TAP FOR SOUND', canvas.width / 2, SAFE_B / 4);
-    ctx.fillStyle    = 'rgba(255,255,255,0.6)';
-    ctx.fillText('🔊 TAP FOR SOUND',   canvas.width / 2, SAFE_B / 4);
+    ctx.strokeText('🔊 TAP FOR SOUND', W/2, 16);
+    ctx.fillStyle    = 'rgba(255,255,255,0.65)';
+    ctx.fillText('🔊 TAP FOR SOUND',   W/2, 16);
   }
   ctx.restore();
 }
 
-// ── Game loop ────────────────────────────────
+// ── Loop ─────────────────────────────────────
 function loop() {
+  const W  = canvas.width, H = canvas.height;
   const MW = 11 * PX, MH = 9 * PX;
 
+  // move
   mx += vx; my += vy;
+  if (mx <= 0)          { mx = 0;      vx =  Math.abs(vx); }
+  if (mx + MW >= W)     { mx = W - MW; vx = -Math.abs(vx); }
+  if (my <= 0)          { my = 0;      vy =  Math.abs(vy); }
+  if (my + MH >= H - SAFE) { my = H - MH - SAFE; vy = -Math.abs(vy); }
 
-  if (mx <= 0)                          { mx = 0;                        vx =  Math.abs(vx); }
-  if (mx + MW >= canvas.width)          { mx = canvas.width  - MW;       vx = -Math.abs(vx); }
-  if (my <= 0)                          { my = 0;                        vy =  Math.abs(vy); }
-  if (my + MH >= canvas.height - SAFE_B){ my = canvas.height - MH - SAFE_B; vy = -Math.abs(vy); }
+  if (++ft >= 18) { fr = 1 - fr; ft = 0; }
 
-  if (++ftick >= 18) { frame = 1 - frame; ftick = 0; }
+  // draw — 2 fillRect for entire background
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = gridPat;
+  ctx.fillRect(0, 0, W, H);
 
-  // ← single drawImage instead of thousands of fillRects
-  ctx.drawImage(bgCache, 0, 0);
-  ctx.drawImage(spriteCache[frame], Math.round(mx), Math.round(my));
+  drawMonster(Math.round(mx), Math.round(my), fr);
   drawText();
 
   requestAnimationFrame(loop);
 }
 
-// ── Init & resize ────────────────────────────
+// ── Init ─────────────────────────────────────
 function init() {
   canvas.width  = window.innerWidth;
   canvas.height = window.innerHeight;
-  rebuild();
+  recalc();
 }
 
 init();
-window.addEventListener('resize', () => { init(); });
+window.addEventListener('resize', init);
 loop();
 
-// ── Chiptune (Web Audio API) ─────────────────
+// ── Chiptune ─────────────────────────────────
 const N = {
   _:0,
   C4:261.63,D4:293.66,E4:329.63,F4:349.23,G4:392,A4:440,B4:493.88,Bb4:466.16,
   C5:523.25,D5:587.33,E5:659.25,F5:698.46,G5:783.99,A5:880,Fs4:369.99,
 };
-const MELODY = [
+const MEL = [
   [N.E5,.25],[N.E5,.25],[N._,.25],[N.E5,.25],[N._,.25],[N.C5,.25],[N.E5,.5],
   [N.G5,.5],[N._,.5],[N.G4,.5],[N._,.5],
   [N.C5,.5],[N._,.25],[N.G4,.25],[N._,.5],[N.E4,.5],
@@ -226,7 +183,7 @@ const MELODY = [
   [N._,.25],[N.G5,.33],[N.Fs4,.33],[N.F5,.33],[N.D5,.5],
   [N.C5,.25],[N.C5,.25],[N._,.5],
 ];
-const BASS = [
+const BSS = [
   [N.C4,.5],[N.C4,.5],[N.G4,.5],[N.G4,.5],
   [N.A4,.5],[N.A4,.5],[N.F4,.5],[N.F4,.5],
   [N.C4,.5],[N.G4,.5],[N.A4,.5],[N.F4,.5],
@@ -235,21 +192,20 @@ const BASS = [
   [N.A4,.5],[N.A4,.5],[N.F4,.5],[N.F4,.5],
 ];
 
-let audioCtx = null, audioStarted = false;
+let AC = null;
 
-function scheduleNotes(notes, type, gain, bps, t0) {
+function sched(notes, type, vol, bps, t0) {
   let t = t0;
-  notes.forEach(([f, b]) => {
+  notes.forEach(([f,b]) => {
     const d = b / bps;
     if (f > 0) {
-      const osc = audioCtx.createOscillator();
-      const g   = audioCtx.createGain();
-      osc.connect(g); g.connect(audioCtx.destination);
-      osc.type = type;
-      osc.frequency.setValueAtTime(f, t);
-      g.gain.setValueAtTime(gain, t);
+      const o = AC.createOscillator(), g = AC.createGain();
+      o.connect(g); g.connect(AC.destination);
+      o.type = type;
+      o.frequency.setValueAtTime(f, t);
+      g.gain.setValueAtTime(vol, t);
       g.gain.exponentialRampToValueAtTime(0.0001, t + d - 0.01);
-      osc.start(t); osc.stop(t + d);
+      o.start(t); o.stop(t + d);
     }
     t += d;
   });
@@ -259,27 +215,25 @@ function scheduleNotes(notes, type, gain, bps, t0) {
 function startMusic() {
   if (audioStarted) return;
   audioStarted = true;
-  const BPS = 180 / 60;
+  const BPS = 3;   // 180 bpm
   (function tick() {
-    const now = audioCtx.currentTime;
-    const e1  = scheduleNotes(MELODY,'square',  0.07, BPS, now);
-    const e2  = scheduleNotes(BASS,  'triangle',0.05, BPS, now);
-    setTimeout(tick, (Math.max(e1,e2) - now) * 1000 - 100);
+    const now = AC.currentTime;
+    const e1  = sched(MEL,'square',  0.07, BPS, now);
+    const e2  = sched(BSS,'triangle',0.05, BPS, now);
+    setTimeout(tick, (Math.max(e1,e2) - now)*1000 - 100);
   })();
 }
 
 function tryAudio() {
-  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-  const go = () => startMusic();
-  audioCtx.state === 'suspended' ? audioCtx.resume().then(go) : go();
+  if (!AC) AC = new (window.AudioContext || window.webkitAudioContext)();
+  AC.state === 'suspended' ? AC.resume().then(startMusic) : startMusic();
 }
 
-// Try immediately (works on desktop / Electron)
 window.addEventListener('load', tryAudio);
-// Guaranteed to work on mobile after any touch/click
-['touchstart','pointerdown','click','keydown'].forEach(ev =>
-  document.addEventListener(ev, tryAudio, { once: true })
+['touchstart','pointerdown','click','keydown'].forEach(e =>
+  document.addEventListener(e, tryAudio, { once: true })
 );
+
 </script>
 </body>
 </html>
