@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>You Have Been Memed</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+
+const canvas = document.getElementById('c');
+const ctx    = canvas.getContext('2d');
+
+function resize() {
+  canvas.width  = window.innerWidth;
+  canvas.height = window.innerHeight;
+}
+resize();
+window.addEventListener('resize', resize);
+
+// ── Pixel grid size ─────────────────────────────────────────
+const GRID = 8;
+
+// ── Sprite pixel size ───────────────────────────────────────
+const PX = 10;
+
+// 0=transparent 1=purple-body 2=dark-eye 3=light-highlight
+const COLORS = {
+  1: '#9333ea',
+  2: '#0a0014',
+  3: '#c084fc',
+};
+
+// ── Two animation frames 11 × 9 ────────────────────────────
+const F = [
+  [ // Frame A
+    [0,0,1,0,0,0,0,0,1,0,0],
+    [0,0,0,1,1,1,1,1,0,0,0],
+    [0,1,1,1,1,1,1,1,1,1,0],
+    [1,1,3,2,1,1,1,2,3,1,1],
+    [1,1,2,2,1,1,1,2,2,1,1],
+    [1,1,1,1,1,1,1,1,1,1,1],
+    [1,1,1,0,1,1,1,0,1,1,1],
+    [0,1,0,0,0,0,0,0,0,1,0],
+    [0,0,1,0,0,0,0,0,1,0,0],
+  ],
+  [ // Frame B
+    [0,0,1,0,0,0,0,0,1,0,0],
+    [0,0,0,1,1,1,1,1,0,0,0],
+    [0,1,1,1,1,1,1,1,1,1,0],
+    [1,1,3,2,1,1,1,2,3,1,1],
+    [1,1,2,2,1,1,1,2,2,1,1],
+    [1,1,1,1,1,1,1,1,1,1,1],
+    [1,0,1,1,0,1,0,1,1,0,1],
+    [1,0,0,0,0,0,0,0,0,0,1],
+    [0,1,0,0,0,0,0,0,0,1,0],
+  ],
+];
+
+const MW = F[0][0].length * PX;
+const MH = F[0].length    * PX;
+
+// ── Monster state ───────────────────────────────────────────
+let mx = 160, my = 140;
+let vx = 1.6, vy = 1.3;   // slow & chill
+let frame = 0, frameTick = 0;
+const FRAME_RATE = 20;
+
+// ── Draw pixel background ───────────────────────────────────
+function drawBackground() {
+  const W = canvas.width, H = canvas.height;
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = '#0d0d0d';
+  for (let x = 0; x < W; x += GRID)
+    for (let y = 0; y < H; y += GRID)
+      ctx.fillRect(x, y, GRID - 1, GRID - 1);
+}
+
+// ── Draw monster ────────────────────────────────────────────
+function drawMonster(ox, oy, fi) {
+  const grid = F[fi];
+
+  // shadow
+  grid.forEach((row, ry) =>
+    row.forEach((cell, rx) => {
+      if (!cell) return;
+      ctx.fillStyle = '#1a003a';
+      ctx.fillRect(ox + rx * PX + 3, oy + ry * PX + 3, PX, PX);
+    })
+  );
+
+  // body
+  grid.forEach((row, ry) =>
+    row.forEach((cell, rx) => {
+      if (!cell) return;
+      ctx.fillStyle = COLORS[cell];
+      ctx.fillRect(ox + rx * PX, oy + ry * PX, PX, PX);
+    })
+  );
+}
+
+// ── Bottom meme text ────────────────────────────────────────
+function drawText() {
+  const txt = 'YOU HAVE BEEN MEMED';
+  ctx.save();
+  ctx.textAlign    = 'center';
+  ctx.textBaseline = 'bottom';
+  ctx.font         = 'bold 36px Impact, Arial Black, sans-serif';
+  // black stroke
+  ctx.strokeStyle  = '#000';
+  ctx.lineWidth    = 6;
+  ctx.strokeText(txt, canvas.width / 2, canvas.height - 14);
+  // white fill
+  ctx.fillStyle    = '#ffffff';
+  ctx.fillText(txt, canvas.width / 2, canvas.height - 14);
+  ctx.restore();
+}
+
+// ── Main loop ───────────────────────────────────────────────
+function loop() {
+  mx += vx;
+  my += vy;
+
+  if (mx <= 0)                  { mx = 0;                  vx =  Math.abs(vx); }
+  if (mx + MW >= canvas.width)  { mx = canvas.width  - MW; vx = -Math.abs(vx); }
+  if (my <= 0)                  { my = 0;                  vy =  Math.abs(vy); }
+  if (my + MH >= canvas.height - 50) { my = canvas.height - MH - 50; vy = -Math.abs(vy); }
+
+  if (++frameTick >= FRAME_RATE) { frame = 1 - frame; frameTick = 0; }
+
+  drawBackground();
+  drawMonster(Math.round(mx), Math.round(my), frame);
+  drawText();
+
+  requestAnimationFrame(loop);
+}
+
+loop();
+
+// ── Chiptune ────────────────────────────────────────────────
+const N = {
+  _:0,
+  C4:261.63, D4:293.66, E4:329.63, F4:349.23, G4:392,   A4:440,   B4:493.88, Bb4:466.16,
+  C5:523.25, D5:587.33, E5:659.25, F5:698.46, G5:783.99, A5:880,   B5:987.77,
+  Cs5:554.37, Fs4:369.99,
+};
+
+const MELODY = [
+  [N.E5,.25],[N.E5,.25],[N._,.25],[N.E5,.25],[N._,.25],[N.C5,.25],[N.E5,.5],
+  [N.G5,.5],[N._,.5],[N.G4,.5],[N._,.5],
+  [N.C5,.5],[N._,.25],[N.G4,.25],[N._,.5],[N.E4,.5],
+  [N.A4,.5],[N.B4,.25],[N.Bb4,.25],[N.A4,.5],
+  [N.G4,.33],[N.E5,.33],[N.G5,.33],[N.A5,.5],[N.F5,.25],[N.G5,.25],
+  [N._,.25],[N.E5,.5],[N.C5,.25],[N.D5,.25],[N.B4,.5],[N._,.25],
+  [N.G5,.33],[N.Fs4,.33],[N.F5,.33],[N.D5,.5],[N.E5,.25],
+  [N._,.25],[N.A4,.25],[N._,.25],[N.A5,.25],[N.C5,.5],
+  [N._,.25],[N.G5,.33],[N.Fs4,.33],[N.F5,.33],[N.D5,.5],
+  [N.C5,.25],[N.C5,.25],[N._,.5],
+];
+
+const BASS = [
+  [N.C4,.5],[N.C4,.5],[N.G4,.5],[N.G4,.5],
+  [N.A4,.5],[N.A4,.5],[N.F4,.5],[N.F4,.5],
+  [N.C4,.5],[N.G4,.5],[N.A4,.5],[N.F4,.5],
+  [N.C4,.5],[N.G4,.5],[N.A4,.5],[N.F4,.5],
+  [N.C4,.5],[N.C4,.5],[N.G4,.5],[N.G4,.5],
+  [N.A4,.5],[N.A4,.5],[N.F4,.5],[N.F4,.5],
+];
+
+let audioCtx = null;
+
+function scheduleNotes(notes, type, gain, bps, startT) {
+  let t = startT;
+  notes.forEach(([freq, beats]) => {
+    const dur = beats / bps;
+    if (freq > 0) {
+      const osc = audioCtx.createOscillator();
+      const g   = audioCtx.createGain();
+      osc.connect(g);
+      g.connect(audioCtx.destination);
+      osc.type = type;
+      osc.frequency.setValueAtTime(freq, t);
+      g.gain.setValueAtTime(gain, t);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + dur - 0.01);
+      osc.start(t);
+      osc.stop(t + dur);
+    }
+    t += dur;
+  });
+  return t;
+}
+
+function startLoop() {
+  const BPS = 180 / 60;
+  function tick() {
+    const now = audioCtx.currentTime;
+    const e1  = scheduleNotes(MELODY, 'square',   0.07, BPS, now);
+    const e2  = scheduleNotes(BASS,   'triangle', 0.05, BPS, now);
+    setTimeout(tick, (Math.max(e1, e2) - now) * 1000 - 120);
+  }
+  tick();
+}
+
+function tryStart() {
+  if (audioCtx) return;
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  const resume = () => audioCtx.state === 'suspended'
+    ? audioCtx.resume().then(startLoop)
+    : startLoop();
+  resume();
+}
+
+// Try immediately (works in some browsers / Electron / desktop)
+window.addEventListener('load', tryStart);
+
+// Fallback: first interaction anywhere starts it silently
+document.addEventListener('pointerdown', tryStart, { once: true });
+document.addEventListener('keydown',     tryStart, { once: true });
+
+</script>
+</body>
+</html>
