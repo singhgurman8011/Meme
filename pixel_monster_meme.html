@@ -112,13 +112,23 @@ function drawText() {
   ctx.textAlign    = 'center';
   ctx.textBaseline = 'bottom';
   ctx.font         = 'bold 36px Impact, Arial Black, sans-serif';
-  // black stroke
   ctx.strokeStyle  = '#000';
   ctx.lineWidth    = 6;
   ctx.strokeText(txt, canvas.width / 2, canvas.height - 14);
-  // white fill
   ctx.fillStyle    = '#ffffff';
   ctx.fillText(txt, canvas.width / 2, canvas.height - 14);
+
+  // sound hint — fades out once audio is running
+  if (!audioStarted) {
+    ctx.font         = 'bold 14px monospace';
+    ctx.textBaseline = 'top';
+    ctx.strokeStyle  = '#000';
+    ctx.lineWidth    = 3;
+    const hint = '🔊 click anywhere for sound';
+    ctx.strokeText(hint, canvas.width / 2, 12);
+    ctx.fillStyle = 'rgba(255,255,255,0.55)';
+    ctx.fillText(hint,   canvas.width / 2, 12);
+  }
   ctx.restore();
 }
 
@@ -173,7 +183,8 @@ const BASS = [
   [N.A4,.5],[N.A4,.5],[N.F4,.5],[N.F4,.5],
 ];
 
-let audioCtx = null;
+let audioCtx    = null;
+let audioStarted = false;
 
 function scheduleNotes(notes, type, gain, bps, startT) {
   let t = startT;
@@ -197,6 +208,8 @@ function scheduleNotes(notes, type, gain, bps, startT) {
 }
 
 function startLoop() {
+  if (audioStarted) return;
+  audioStarted = true;
   const BPS = 180 / 60;
   function tick() {
     const now = audioCtx.currentTime;
@@ -208,20 +221,18 @@ function startLoop() {
 }
 
 function tryStart() {
-  if (audioCtx) return;
-  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-  const resume = () => audioCtx.state === 'suspended'
-    ? audioCtx.resume().then(startLoop)
-    : startLoop();
-  resume();
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  if (audioCtx.state === 'suspended') audioCtx.resume().then(startLoop);
+  else startLoop();
 }
 
-// Try immediately (works in some browsers / Electron / desktop)
+// Try on load (works in Electron / some desktop browsers)
 window.addEventListener('load', tryStart);
 
-// Fallback: first interaction anywhere starts it silently
-document.addEventListener('pointerdown', tryStart, { once: true });
-document.addEventListener('keydown',     tryStart, { once: true });
+// Any interaction unlocks audio in strict browsers
+['click','touchstart','pointerdown','keydown'].forEach(e =>
+  document.addEventListener(e, tryStart, { once: true })
+);
 
 </script>
 </body>
